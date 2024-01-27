@@ -34,10 +34,6 @@ SIGN_EXTENSION_FMT = '''
 
 '''
 
-INIT_SIGNAL_BODY_TEMPLATE_FMT = '''\
-    msg_p->{signal_name} = {signal_initial};
-'''
-
 
 class CodeGenSignal:
 
@@ -803,7 +799,6 @@ def _generate_definitions(cg_messages: List["CodeGenMessage"],
         signal_definitions = []
         is_sender = _is_sender(cg_message, node_name)
         is_receiver = node_name is None
-        signals_init_body = ''
 
         for cg_signal in cg_message.cg_signals:
             if use_float and cg_signal.type_name == "double":
@@ -821,27 +816,29 @@ def _generate_definitions(cg_messages: List["CodeGenMessage"],
             if _is_receiver(cg_signal, node_name):
                 is_receiver = True
 
-            signal_definition = {'signal_name': cg_signal.snake_name,
-                                  'type_name': cg_signal.type_name,
-                                  'encode': encode,
-                                  'decode': decode,
-                                  'floating_point_type' :_get_floating_point_type(_use_float),
-                                  'check': check,
-                                  'receiver': _is_receiver(cg_signal, node_name)}
+            signal_definition = {
+                'signal_name': cg_signal.snake_name,
+                'type_name': cg_signal.type_name,
+                'encode': encode,
+                'decode': decode,
+                'floating_point_type' :_get_floating_point_type(_use_float),
+                'check': check,
+                'receiver': _is_receiver(cg_signal, node_name),
+                'initial': cg_signal.signal.initial,
+                'raw_initial': cg_signal.signal.raw_initial
+            }
 
             if is_sender or _is_receiver(cg_signal, node_name):
                 signal_definitions.append(signal_definition)
 
-            if cg_signal.signal.initial:
-                signals_init_body += INIT_SIGNAL_BODY_TEMPLATE_FMT.format(signal_initial=cg_signal.signal.raw_initial,
-                                                                          signal_name=cg_signal.snake_name)
-
-        definition = {'database_message_name': cg_message.message.name,
-                       'message_name': cg_message.snake_name,
-                       'message_length': cg_message.message.length,
-                       'node_name': node_name,
-                       'sender': is_sender,
-                       'receiver': is_receiver}
+        definition = {
+            'database_message_name': cg_message.message.name,
+            'message_name': cg_message.snake_name,
+            'message_length': cg_message.message.length,
+            'node_name': node_name,
+            'sender': is_sender,
+            'receiver': is_receiver
+        }
 
         if cg_message.message.length > 0:
             pack_variables, pack_body = _format_pack_code(cg_message,
@@ -857,8 +854,6 @@ def _generate_definitions(cg_messages: List["CodeGenMessage"],
             if is_receiver:
                 definition['unpack_variables'] = unpack_variables
                 definition['unpack_body'] = unpack_body
-
-            definition['signals_init_body'] = signals_init_body
 
         definition['signal_definitions'] = signal_definitions
         definitions.append(definition)
