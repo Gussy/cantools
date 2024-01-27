@@ -27,103 +27,6 @@ _T2 = TypeVar("_T2")
 THelperKind = Tuple[str, int]
 
 
-MESSAGE_DEFINITION_INIT_FMT = '''\
-int {database_name}_{message_name}_init(struct {database_name}_{message_name}_t *msg_p)
-{{
-    if (msg_p == NULL) return -1;
-
-    memset(msg_p, 0, sizeof(struct {database_name}_{message_name}_t));
-{init_body}
-    return 0;
-}}
-'''
-
-DEFINITION_PACK_FMT = '''\
-int {database_name}_{message_name}_pack(
-    uint8_t *dst_p,
-    const struct {database_name}_{message_name}_t *src_p,
-    size_t size)
-{{
-{pack_unused}\
-{pack_variables}\
-    if (size < {message_length}u) {{
-        return (-EINVAL);
-    }}
-
-    memset(&dst_p[0], 0, {message_length});
-{pack_body}
-    return ({message_length});
-}}
-
-'''
-
-DEFINITION_UNPACK_FMT = '''\
-int {database_name}_{message_name}_unpack(
-    struct {database_name}_{message_name}_t *dst_p,
-    const uint8_t *src_p,
-    size_t size)
-{{
-{unpack_unused}\
-{unpack_variables}\
-    if (size < {message_length}u) {{
-        return (-EINVAL);
-    }}
-{unpack_body}
-    return (0);
-}}
-
-'''
-
-SIGNAL_DEFINITION_ENCODE_FMT = '''\
-{type_name} {database_name}_{message_name}_{signal_name}_encode({floating_point_type} value)
-{{
-    return ({type_name})({encode});
-}}
-
-'''
-
-SIGNAL_DEFINITION_DECODE_FMT = '''\
-{floating_point_type} {database_name}_{message_name}_{signal_name}_decode({type_name} value)
-{{
-    return ({decode});
-}}
-
-'''
-
-SIGNAL_DEFINITION_IS_IN_RANGE_FMT = '''\
-bool {database_name}_{message_name}_{signal_name}_is_in_range({type_name} value)
-{{
-{unused}\
-    return ({check});
-}}
-'''
-
-EMPTY_DEFINITION_FMT = '''\
-int {database_name}_{message_name}_pack(
-    uint8_t *dst_p,
-    const struct {database_name}_{message_name}_t *src_p,
-    size_t size)
-{{
-    (void)dst_p;
-    (void)src_p;
-    (void)size;
-
-    return (0);
-}}
-
-int {database_name}_{message_name}_unpack(
-    struct {database_name}_{message_name}_t *dst_p,
-    const uint8_t *src_p,
-    size_t size)
-{{
-    (void)dst_p;
-    (void)src_p;
-    (void)size;
-
-    return (0);
-}}
-'''
-
 SIGN_EXTENSION_FMT = '''
     if (({name} & (1{suffix} << {shift})) != 0{suffix}) {{
         {name} |= 0x{mask:x}{suffix};
@@ -888,9 +791,7 @@ def _generate_declarations(cg_messages: List["CodeGenMessage"],
     return declarations
 
 
-def _generate_definitions(database_name: str,
-                          cg_messages: List["CodeGenMessage"],
-                          floating_point_numbers: bool,
+def _generate_definitions(cg_messages: List["CodeGenMessage"],
                           use_float: bool,
                           node_name: Optional[str],
                           ) -> Tuple[str, Tuple[Set[THelperKind], Set[THelperKind]]]:
@@ -920,45 +821,27 @@ def _generate_definitions(database_name: str,
             if _is_receiver(cg_signal, node_name):
                 is_receiver = True
 
-            if check == 'true':
-                unused = '    (void)value;\n\n'
-            else:
-                unused = ''
-
-            signal_definition = ''
-
-            if floating_point_numbers:
-                if is_sender:
-                    signal_definition += SIGNAL_DEFINITION_ENCODE_FMT.format(
-                        database_name=database_name,
-                        message_name=cg_message.snake_name,
-                        signal_name=cg_signal.snake_name,
-                        type_name=cg_signal.type_name,
-                        encode=encode,
-                        floating_point_type=_get_floating_point_type(_use_float))
-                if node_name is None or _is_receiver(cg_signal, node_name):
-                    signal_definition += SIGNAL_DEFINITION_DECODE_FMT.format(
-                        database_name=database_name,
-                        message_name=cg_message.snake_name,
-                        signal_name=cg_signal.snake_name,
-                        type_name=cg_signal.type_name,
-                        decode=decode,
-                        floating_point_type=_get_floating_point_type(_use_float))
+            signal_definition = {'signal_name': cg_signal.snake_name,
+                                  'type_name': cg_signal.type_name,
+                                  'encode': encode,
+                                  'decode': decode,
+                                  'floating_point_type' :_get_floating_point_type(_use_float),
+                                  'check': check,
+                                  'receiver': _is_receiver(cg_signal, node_name)}
 
             if is_sender or _is_receiver(cg_signal, node_name):
-                signal_definition += SIGNAL_DEFINITION_IS_IN_RANGE_FMT.format(
-                    database_name=database_name,
-                    message_name=cg_message.snake_name,
-                    signal_name=cg_signal.snake_name,
-                    type_name=cg_signal.type_name,
-                    unused=unused,
-                    check=check)
-
                 signal_definitions.append(signal_definition)
 
             if cg_signal.signal.initial:
                 signals_init_body += INIT_SIGNAL_BODY_TEMPLATE_FMT.format(signal_initial=cg_signal.signal.raw_initial,
                                                                           signal_name=cg_signal.snake_name)
+
+        definition = {'database_message_name': cg_message.message.name,
+                       'message_name': cg_message.snake_name,
+                       'message_length': cg_message.message.length,
+                       'node_name': node_name,
+                       'sender': is_sender,
+                       'receiver': is_receiver}
 
         if cg_message.message.length > 0:
             pack_variables, pack_body = _format_pack_code(cg_message,
@@ -966,50 +849,21 @@ def _generate_definitions(database_name: str,
             unpack_variables, unpack_body = _format_unpack_code(cg_message,
                                                                 unpack_helper_kinds,
                                                                 node_name)
-            pack_unused = ''
-            unpack_unused = ''
-
-            if not pack_body:
-                pack_unused += '    (void)src_p;\n\n'
-
-            if not unpack_body:
-                unpack_unused += '    (void)dst_p;\n'
-                unpack_unused += '    (void)src_p;\n\n'
-
-            definition = ""
+                
             if is_sender:
-                definition += DEFINITION_PACK_FMT.format(database_name=database_name,
-                                                         database_message_name=cg_message.message.name,
-                                                         message_name=cg_message.snake_name,
-                                                         message_length=cg_message.message.length,
-                                                         pack_unused=pack_unused,
-                                                         pack_variables=pack_variables,
-                                                         pack_body=pack_body)
+                definition['pack_variables'] = pack_variables
+                definition['pack_body'] = pack_body
+
             if is_receiver:
-                definition += DEFINITION_UNPACK_FMT.format(database_name=database_name,
-                                                           database_message_name=cg_message.message.name,
-                                                           message_name=cg_message.snake_name,
-                                                           message_length=cg_message.message.length,
-                                                           unpack_unused=unpack_unused,
-                                                           unpack_variables=unpack_variables,
-                                                           unpack_body=unpack_body)
+                definition['unpack_variables'] = unpack_variables
+                definition['unpack_body'] = unpack_body
 
-            definition += MESSAGE_DEFINITION_INIT_FMT.format(database_name=database_name,
-                                                             database_message_name=cg_message.message.name,
-                                                             message_name=cg_message.snake_name,
-                                                             init_body=signals_init_body)
+            definition['signals_init_body'] = signals_init_body
 
-        else:
-            definition = EMPTY_DEFINITION_FMT.format(database_name=database_name,
-                                                     message_name=cg_message.snake_name)
+        definition['signal_definitions'] = signal_definitions
+        definitions.append(definition)
 
-        if signal_definitions:
-            definition += '\n' + '\n'.join(signal_definitions)
-
-        if definition:
-            definitions.append(definition)
-
-    return '\n'.join(definitions), (pack_helper_kinds, unpack_helper_kinds)
+    return definitions, (pack_helper_kinds, unpack_helper_kinds)
 
 
 def _generate_fuzzer_source(jinja_env: Environment,
@@ -1091,9 +945,7 @@ def generate(database: "Database",
                                           floating_point_numbers,
                                           use_float,
                                           node_name)
-    definitions, helper_kinds = _generate_definitions(database_name,
-                                                      cg_messages,
-                                                      floating_point_numbers,
+    definitions, helper_kinds = _generate_definitions(cg_messages,
                                                       use_float,
                                                       node_name)
     pack_helper_kinds, unpack_helper_kinds = helper_kinds
@@ -1119,10 +971,12 @@ def generate(database: "Database",
     source_template = jinja_env.get_template('source.c.jinja')
     source = source_template.render(version=__version__,
                                     date=date,
+                                    database_name=database_name,
                                     header=header_name,
                                     pack_helpers=pack_helper_kinds,
                                     unpack_helpers=unpack_helper_kinds,
-                                    definitions=definitions)
+                                    definitions=definitions,
+                                    floating_point_numbers=floating_point_numbers)
 
     fuzzer_source, fuzzer_makefile = _generate_fuzzer_source(
         jinja_env,
