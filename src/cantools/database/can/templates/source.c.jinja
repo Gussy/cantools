@@ -57,4 +57,112 @@ static inline uint{{ k[1] }}_t unpack_{{ k[0] }}_shift_u{{ k[1] }}(
 {%- endif %}  
 }
 {% endfor %}
-{{ definitions }}
+
+{%- for d in definitions %}
+{%- if d.message_length > 0 %}
+{%- if d.sender %}
+int {{ database_name }}_{{ d.message_name }}_pack(
+    uint8_t *dst_p,
+    const struct {{ database_name }}_{{ d.message_name }}_t *src_p,
+    size_t size)
+{
+{%- if not d.pack_body %}
+    (void)src_p;
+
+
+{%- endif %} 
+{{ d.pack_variables}}
+    if (size < {{ d.message_length }}u) {
+        return (-EINVAL);
+    }
+
+    memset(&dst_p[0], 0, {{ d.message_length }});
+{{ d.pack_body}}
+    return ({{ d.message_length }});
+}
+{%- endif %}
+{%- if d.receiver %}
+int {{ database_name }}_{{ d.message_name }}_unpack(
+    struct {{ database_name }}_{{ d.message_name }}_t *dst_p,
+    const uint8_t *src_p,
+    size_t size)
+{
+{%- if not d.unpack_body %}
+    (void)dst_p;
+    (void)src_p;
+
+
+{%- endif %} 
+{{ d.unpack_variables }}
+    if (size < {{ d.message_length }}u) {
+        return (-EINVAL);
+    }
+{{ d.unpack_body }}
+    return (0);
+}
+{%- endif %}
+int {{ database_name }}_{{ d.message_name }}_init(struct {{ database_name }}_{{ d.message_name }}_t *msg_p)
+{
+    if (msg_p == NULL) return -1;
+
+    memset(msg_p, 0, sizeof(struct {{ database_name }}_{{ d.message_name }}_t));
+{{ d.signals_init_body }}
+signals_init_body
+    return 0;
+}
+{%- else %}
+int {{ database_name }}_{{ d.message_name }}_pack(
+    uint8_t *dst_p,
+    const struct {{ database_name }}_{{ d.message_name }}_t *src_p,
+    size_t size)
+{
+    (void)dst_p;
+    (void)src_p;
+    (void)size;
+
+    return (0);
+}
+
+int {{ database_name }}_{{ d.message_name }}_unpack(
+    struct {{ database_name }}_{{ d.message_name }}_t *dst_p,
+    const uint8_t *src_p,
+    size_t size)
+{
+    (void)dst_p;
+    (void)src_p;
+    (void)size;
+
+    return (0);
+}
+{%- endif %}
+
+
+{%- for s in d.signal_definitions %}
+{%- if floating_point_numbers %}
+{%- if d.sender %}
+{{ s.type_name }} {{ database_name }}_{{ d.message_name }}_{{ s.signal_name }}_encode({{ s.floating_point_type }} value)
+{
+    return ({{ s.type_name }})({{ s.encode }});
+}
+{%- endif %}
+{%- if d.node_name is none or s.receiver %}
+{{ s.floating_point_type }} {{ database_name }}_{{ d.message_name }}_{{ s.signal_name }}_decode({{ s.type_name }} value)
+{
+    return ({{ s.decode }});
+}
+{%- endif %}
+{%- endif %}
+{%- if d.sender or s.receiver %}
+bool {{ database_name }}_{{ d.message_name }}_{{ s.signal_name }}_is_in_range({{ s.type_name }} value)
+{
+{%- if s.check == 'true' %}
+    (void)value;
+
+
+{%- endif %}
+    return ({{ s.check }});
+}
+{%- endif %}
+{% endfor %}
+{% endfor %}
+
