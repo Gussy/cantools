@@ -38,46 +38,6 @@ int {database_name}_{message_name}_init(struct {database_name}_{message_name}_t 
 }}
 '''
 
-PACK_HELPER_LEFT_SHIFT_FMT = '''\
-static inline uint8_t pack_left_shift_u{length}(
-    {var_type} value,
-    uint8_t shift,
-    uint8_t mask)
-{{
-    return (uint8_t)((uint8_t)(value << shift) & mask);
-}}
-'''
-
-PACK_HELPER_RIGHT_SHIFT_FMT = '''\
-static inline uint8_t pack_right_shift_u{length}(
-    {var_type} value,
-    uint8_t shift,
-    uint8_t mask)
-{{
-    return (uint8_t)((uint8_t)(value >> shift) & mask);
-}}
-'''
-
-UNPACK_HELPER_LEFT_SHIFT_FMT = '''\
-static inline {var_type} unpack_left_shift_u{length}(
-    uint8_t value,
-    uint8_t shift,
-    uint8_t mask)
-{{
-    return ({var_type})(({var_type})(value & mask) << shift);
-}}
-'''
-
-UNPACK_HELPER_RIGHT_SHIFT_FMT = '''\
-static inline {var_type} unpack_right_shift_u{length}(
-    uint8_t value,
-    uint8_t shift,
-    uint8_t mask)
-{{
-    return ({var_type})(({var_type})(value & mask) >> shift);
-}}
-'''
-
 DEFINITION_PACK_FMT = '''\
 int {database_name}_{message_name}_pack(
     uint8_t *dst_p,
@@ -1052,39 +1012,6 @@ def _generate_definitions(database_name: str,
     return '\n'.join(definitions), (pack_helper_kinds, unpack_helper_kinds)
 
 
-def _generate_helpers_kind(kinds: Set[THelperKind],
-                           left_format: str,
-                           right_format: str) -> List[str]:
-    formats = {
-        'left': left_format,
-        'right': right_format
-    }
-    helpers = []
-
-    for shift_direction, length in sorted(kinds):
-        var_type = f'uint{length}_t'
-        helper = formats[shift_direction].format(length=length,
-                                                 var_type=var_type)
-        helpers.append(helper)
-
-    return helpers
-
-
-def _generate_helpers(kinds: Tuple[Set[THelperKind], Set[THelperKind]]) -> str:
-    pack_helpers = _generate_helpers_kind(kinds[0],
-                                          PACK_HELPER_LEFT_SHIFT_FMT,
-                                          PACK_HELPER_RIGHT_SHIFT_FMT)
-    unpack_helpers = _generate_helpers_kind(kinds[1],
-                                            UNPACK_HELPER_LEFT_SHIFT_FMT,
-                                            UNPACK_HELPER_RIGHT_SHIFT_FMT)
-    helpers = pack_helpers + unpack_helpers
-
-    if helpers:
-        helpers.append('')
-
-    return '\n'.join(helpers)
-
-
 def _generate_fuzzer_source(jinja_env: Environment,
                             database_name: str,
                             cg_messages: List["CodeGenMessage"],
@@ -1169,7 +1096,7 @@ def generate(database: "Database",
                                                       floating_point_numbers,
                                                       use_float,
                                                       node_name)
-    helpers = _generate_helpers(helper_kinds)
+    pack_helper_kinds, unpack_helper_kinds = helper_kinds
 
     dir_path = os.path.dirname(os.path.realpath(__file__))
     loader = FileSystemLoader(os.path.join(dir_path, 'templates'))
@@ -1193,7 +1120,8 @@ def generate(database: "Database",
     source = source_template.render(version=__version__,
                                     date=date,
                                     header=header_name,
-                                    helpers=helpers,
+                                    pack_helpers=pack_helper_kinds,
+                                    unpack_helpers=unpack_helper_kinds,
                                     definitions=definitions)
 
     fuzzer_source, fuzzer_makefile = _generate_fuzzer_source(
