@@ -87,3 +87,6 @@ some_dir/
 
 # IDEs
 .vscode
+
+# Hermit
+.hermit/
